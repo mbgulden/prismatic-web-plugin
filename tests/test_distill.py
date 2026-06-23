@@ -178,18 +178,12 @@ class TestIssueForDeploy:
 # ─────────────────────────────────────────────────────────────────────
 
 class TestCreateIssue:
-    def test_returns_identifier_on_success(self, mock_linear_gql: MagicMock):
-        mock_linear_gql.return_value = {
-            "data": {
-                "issueCreate": {
-                    "success": True,
-                    "issue": {"id": "uuid-1", "identifier": "GRO-9999"},
-                }
-            }
-        }
-        # Need label map
-        mock_linear_gql.side_effect = None
-        # First call: lookup_labels, second: issueCreate
+    def test_returns_identifier_on_success(self, mock_linear_gql: MagicMock, monkeypatch):
+        """Patch distill.gql so create_issue never hits the network."""
+        monkeypatch.setattr(
+            "prismatic_web_plugin.distill.gql",
+            mock_linear_gql,
+        )
         mock_linear_gql.side_effect = [
             {"data": {"issueLabels": {"nodes": [
                 {"id": "lbl-1", "name": "agent:fred"},
@@ -202,7 +196,11 @@ class TestCreateIssue:
         result = create_issue("Title", "Desc", ["agent:fred"], priority=2)
         assert result == "GRO-9999"
 
-    def test_returns_none_on_failure(self, mock_linear_gql: MagicMock):
+    def test_returns_none_on_failure(self, mock_linear_gql: MagicMock, monkeypatch):
+        monkeypatch.setattr(
+            "prismatic_web_plugin.distill.gql",
+            mock_linear_gql,
+        )
         mock_linear_gql.side_effect = [
             {"data": {"issueLabels": {"nodes": [
                 {"id": "lbl-1", "name": "agent:fred"},
@@ -212,15 +210,23 @@ class TestCreateIssue:
         result = create_issue("Title", "Desc", ["agent:fred"], priority=2)
         assert result is None
 
-    def test_warns_and_returns_none_when_no_labels(self, mock_linear_gql: MagicMock, capsys):
+    def test_warns_and_returns_none_when_no_labels(self, mock_linear_gql: MagicMock, capsys, monkeypatch):
         """If none of the requested labels exist, returns None and prints warning."""
+        monkeypatch.setattr(
+            "prismatic_web_plugin.distill.gql",
+            mock_linear_gql,
+        )
         mock_linear_gql.return_value = {"data": {"issueLabels": {"nodes": []}}}
         result = create_issue("Title", "Desc", ["agent:nope"], priority=2)
         assert result is None
         captured = capsys.readouterr()
         assert "no valid labels" in captured.err.lower() or "Warning" in captured.err
 
-    def test_passes_parent_id(self, mock_linear_gql: MagicMock):
+    def test_passes_parent_id(self, mock_linear_gql: MagicMock, monkeypatch):
+        monkeypatch.setattr(
+            "prismatic_web_plugin.distill.gql",
+            mock_linear_gql,
+        )
         mock_linear_gql.side_effect = [
             {"data": {"issueLabels": {"nodes": [
                 {"id": "lbl-1", "name": "agent:fred"},
@@ -244,7 +250,11 @@ class TestCreateIssue:
 # ─────────────────────────────────────────────────────────────────────
 
 class TestLookupLabels:
-    def test_returns_name_to_id_map(self, mock_linear_gql: MagicMock):
+    def test_returns_name_to_id_map(self, mock_linear_gql: MagicMock, monkeypatch):
+        monkeypatch.setattr(
+            "prismatic_web_plugin.distill.gql",
+            mock_linear_gql,
+        )
         mock_linear_gql.return_value = {
             "data": {
                 "issueLabels": {
@@ -258,7 +268,11 @@ class TestLookupLabels:
         labels = lookup_labels()
         assert labels == {"agent:fred": "lbl-1", "agent:ned": "lbl-2"}
 
-    def test_returns_empty_on_error(self, mock_linear_gql: MagicMock, capsys):
+    def test_returns_empty_on_error(self, mock_linear_gql: MagicMock, capsys, monkeypatch):
+        monkeypatch.setattr(
+            "prismatic_web_plugin.distill.gql",
+            mock_linear_gql,
+        )
         mock_linear_gql.side_effect = Exception("network down")
         labels = lookup_labels()
         assert labels == {}

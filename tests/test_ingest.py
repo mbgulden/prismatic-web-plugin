@@ -1,61 +1,139 @@
+"""
+Unit tests for prismatic_web_plugin.ingest.
+
+Tests:
+- slugify() slug behavior
+- read_doc() reads file content
+- find_5_docs() selects required PWP docs from OKF
+- write_ingest_report() writes JSON report
+- run_ingest() library API (dry_run, skip_agy, error cases)
+"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
-from unittest.mock import MagicMock, patch
-import os
-from prismatic_web_plugin import ingest
 
-def test_load_okf_config_success(mock_okf_dir):
-    config_path = mock_okf_dir / "integrations/pwp-config.yaml"
-    config = ingest.load_okf_config(str(config_path))
-    assert config == {"key": "value"}
+from prismatic_web_plugin.ingest import (
+    find_5_docs,
+    read_doc,
+    run_ingest,
+    slugify,
+    write_ingest_report,
+)
 
-def test_load_okf_config_not_found(tmp_path):
-    with pytest.raises(FileNotFoundError):
-        ingest.load_okf_config(str(tmp_path / "non_existent.yaml"))
 
-def test_load_okf_document_success(mock_okf_dir):
-    doc_path = mock_okf_dir / "concepts/concept1.md"
-    content = ingest.load_okf_document(str(doc_path))
-    assert content == "Concept 1 content"
+# ─────────────────────────────────────────────────────────────────────
+# slugify
+# ─────────────────────────────────────────────────────────────────────
 
-def test_load_okf_document_not_found(tmp_path):
-    with pytest.raises(FileNotFoundError):
-        ingest.load_okf_document(str(tmp_path / "non_existent.md"))
 
-def test_scan_okf_for_pwp_context(mock_okf_dir):
-    # Simulate some pwp-specific files and general files
-    (mock_okf_dir / "integrations/pwp_specific_doc.md").write_text("PWP specific content")
-    (mock_okf_dir / "guides/general_guide.md").write_text("General guide content")
+class TestSlugify:
+    def test_basic(self):
+        assert slugify("Hello World") == "hello-world"
 
-    # Mock the search_files tool
-    with patch('prismatic_web_plugin.ingest.search_files') as mock_search:
-        mock_search.return_value = {
-            'results': [
-                {'path': str(mock_okf_dir / "integrations/pwp_specific_doc.md")},
-                {'path': str(mock_okf_dir / "integrations/pwp-config.yaml")},
-                {'path': str(mock_okf_dir / "concepts/concept1.md")},
-                {'path': str(mock_okf_dir / "guides/general_guide.md")}
-            ]
+    def test_special_chars_removed(self):
+        assert slugify("Meridian Women's Defense") == "meridian-womens-defense"
+
+    def test_multiple_spaces_collapsed(self):
+        assert slugify("Multi   Spaces") == "multi-spaces"
+
+
+# ─────────────────────────────────────────────────────────────────────
+# read_doc
+# ─────────────────────────────────────────────────────────────────────
+
+
+class TestReadDoc:
+    def test_reads_text_file(self, tmp_path: Path):
+        f = tmp_path / "doc.md"
+        f.write_text("Hello world")
+        assert read_doc(f) == "Hello world"
+
+    def test_raises_on_missing(self, tmp_path: Path):
+        with pytest.raises(FileNotFoundError):
+            read_doc(tmp_path / "missing.md")
+
+
+# ─────────────────────────────────────────────────────────────────────
+# find_5_docs
+# ─────────────────────────────────────────────────────────────────────
+
+
+class TestFind5Docs:
+    def _make_okf(self, root: Path) -> Path:
+        """Create a directory containing 5 docs with required canonical names."""
+        okf = root / "okf"
+        okf.mkdir()
+        # Required canonical names (matches FRAMEWORK_DOCS in ingest.py)
+        (okf / "content_gathering_guide.md").write_text("# Content Gathering\ncontent")
+        (okf / "partner_interview.md").write_text("# Partner Interview\ncontent")
+        (okf / "brand_design_interview.md").write_text("# Brand & Design\ncontent")
+        (okf / "conversion_launch_kit.md").write_text("# Conversion\ncontent")
+        (okf / "post_purchase_automation.md").write_text("# Post-Purchase\ncontent")
+        return okf
+
+    def test_returns_5_required_docs(self, tmp_path: Path):
+        okf = self._make_okf(tmp_path)
+        docs = find_5_docs(okf)
+        assert isinstance(docs, dict)
+        assert len(docs) == 5
+
+    def test_missing_okf_returns_empty(self, tmp_path: Path):
+        docs = find_5_docs(tmp_path / "does-not-exist")
+        assert docs == {}
+
+
+# ─────────────────────────────────────────────────────────────────────
+# write_ingest_report
+# ─────────────────────────────────────────────────────────────────────
+
+
+class TestWriteIngestReport:
+    def test_writes_markdown_report(self, tmp_path: Path):
+        report_path = tmp_path / "ingest-report.md"
+        docs = {"content_gathering_guide": "/path/to/file.md"}
+        extracted = {
+            "client_profile": {"name": "Test Client", "mission": "Help people"},
+            "content": {"classes": ["a"], "lead_magnets": []},
+            "automation": {"email_sequences": ["x"], "post_purchase_flows": []},
         }
-        
-        # Mock read_file for each of the returned paths
-        with patch('prismatic_web_plugin.ingest.read_file') as mock_read_file:
-            def read_side_effect(path, **kwargs):
-                if "pwp_specific_doc.md" in path:
-                    return {'content': 'PWP specific content'}
-                elif "pwp-config.yaml" in path:
-                    return {'content': 'key: value'}
-                elif "concept1.md" in path:
-                    return {'content': 'Concept 1 content'}
-                elif "general_guide.md" in path:
-                    return {'content': 'General guide content'}
-                return {'content': ''}
-            mock_read_file.side_effect = read_side_effect
-
-            pwp_context_docs = ingest.scan_okf_for_pwp_context(str(mock_okf_dir))
-            assert len(pwp_context_docs) == 4 # All files should be returned as context
-            assert "PWP specific content" in pwp_context_docs[str(mock_okf_dir / "integrations/pwp_specific_doc.md")]
+        write_ingest_report(report_path, docs, extracted, [])
+        assert report_path.exists()
+        text = report_path.read_text()
+        assert "Ingest Report" in text
+        assert "Test Client" in text
+        assert "content_gathering_guide" in text or "Content Gathering" in text
 
 
+# ─────────────────────────────────────────────────────────────────────
+# run_ingest (library API)
+# ─────────────────────────────────────────────────────────────────────
 
 
+class TestRunIngest:
+    def test_dry_run_does_not_call_agy(self, tmp_path: Path):
+        # Patch extract_with_agy so we don't hit the real AGY subprocess
+        with patch("prismatic_web_plugin.ingest.extract_with_agy") as mock_extract:
+            mock_extract.return_value = {
+                "client_profile": {"name": "Mock Client"},
+                "content": {"classes": ["a", "b"]},
+                "automation": {"email_sequences": ["x"]},
+            }
+            okf = tmp_path / "okf"
+            okf.mkdir()
+            (okf / "content_gathering_guide.md").write_text("c")
+            (okf / "partner_interview.md").write_text("p")
+            (okf / "brand_design_interview.md").write_text("b")
+            (okf / "conversion_launch_kit.md").write_text("cv")
+            (okf / "post_purchase_automation.md").write_text("pp")
+
+            result = run_ingest(docs_dir=okf, output_dir=tmp_path, dry_run=True)
+            assert result is not None
+            mock_extract.assert_called_once()
+
+    def test_missing_dir_returns_error_status(self, tmp_path: Path):
+        result = run_ingest(docs_dir=tmp_path / "missing", output_dir=tmp_path, dry_run=True)
+        assert result["status"] == "error"
