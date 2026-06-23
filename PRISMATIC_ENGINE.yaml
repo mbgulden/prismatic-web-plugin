@@ -1,0 +1,59 @@
+# PRISMATIC ENGINE — Workspace Governance
+# Installed: 2026-06-23 by Fred (per GRO-2230)
+# Repo: prismatic-web-plugin
+#
+# This file governs how AI agents collaborate on this repository.
+# Every agent MUST respect lane assignments, branch conventions, and locking protocol.
+
+version: 1
+
+agents:
+  fred:
+    role: Orchestrator & Infrastructure
+    lanes:
+      owner: ["*"]  # Orchestrator needs write access to every directory
+      read_only: []
+    branch_prefix: "feature/"
+    staging_governor: true  # Only Fred merges to deploy-fresh
+
+  kai:
+    role: Content Writer
+    lanes:
+      owner: ["docs/", "okf/", "README.md", "examples/"]
+      read_only: ["src/", "tests/"]
+    branch_prefix: "content/"
+
+  agy:
+    role: Research & Audit
+    lanes:
+      owner: ["okf/audits/"]
+      read_only: ["docs/"]
+    branch_prefix: "research/"
+
+  jules:
+    role: PR Auditor
+    lanes:
+      owner: ["docs/"]
+      read_only: ["*"]
+    branch_prefix: "jules/"
+
+  ned:
+    role: Code Execution & Infrastructure
+    lanes:
+      owner: ["src/", "tests/", "bin/", "scripts/"]
+      read_only: ["docs/", "okf/"]
+    branch_prefix: "ned/"
+
+locks:
+  file: "${PRISMATIC_HOME}/.antigravity/swarm_locks.json"
+  heartbeat_interval_s: 60
+  heartbeat_ttl_ms: 300000  # 5-minute stale timeout
+
+staging:
+  governor: "fred"
+  branch: "deploy-fresh"
+
+commit:
+  prefix_format: "[Fred] description (#ISSUE)"
+  example: "[Fred] Add ingestion step (#GRO-2138)"
+  require_issue_ref: true
