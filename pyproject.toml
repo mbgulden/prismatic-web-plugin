@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "prismatic-web-plugin"
+version = "0.1.0"
+description = "Turn any client's Website Content Gathering Framework into a deployed website via the Prismatic Engine agent swarm"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Michael Gulden", email = "mbgulden@gmail.com" },
+]
+keywords = ["website", "build", "agent", "orchestration", "prismatic-engine"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+[project.scripts]
+pwp = "prismatic_web_plugin.orchestrator:main"
+
+[project.urls]
+"Source" = "https://github.com/mbgulden/prismatic-web-plugin"
+"Issues" = "https://linear.app/growthwebdev/issue/GRO-2137"
