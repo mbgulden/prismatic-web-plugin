@@ -1,5 +1,5 @@
 """
-prismatic-web-plugin orchestrator
+prismatic-web-plugin builder
 
 The "system" that ties together the 3 PWP steps (ingest, synthesize, distill)
 with the agent swarm (dispatch, build, review, deploy) and the post-build
@@ -10,13 +10,13 @@ docs, not just Meridian.
 
 Usage:
     # Full pipeline (new client)
-    python -m prismatic_web_plugin.orchestrator run --client meridian-womens-defense
+    python -m prismatic_web_plugin.builder run --client meridian-womens-defense
 
     # Watch a running build
-    python -m prismatic_web_plugin.orchestrator watch --epic GRO-2142
+    python -m prismatic_web_plugin.builder watch --epic GRO-2142
 
     # Report build status
-    python -m prismatic_web_plugin.orchestrator status --epic GRO-2142
+    python -m prismatic_web_plugin.builder status --epic GRO-2142
 """
 from __future__ import annotations
 
@@ -59,7 +59,7 @@ def _run_step(step: str, script: str, *args, env: dict | None = None) -> dict:
 
 
 def load_env():
-    """Load .env from the orchestrator profile."""
+    """Load .env from the orchestrator profile.""" # hermes orchestrator profile, not this CLI
     env_path = Path("/home/ubuntu/.hermes/profiles/orchestrator/.env")
     if not env_path.exists():
         return {}
@@ -249,7 +249,7 @@ def _post_progress_comment(epic_id: str, status: dict, api_key: str):
     done = summary["done"]
     in_prog = summary["in_progress"]
     pct = int(100 * done / total) if total else 0
-    body = f"""PWP orchestrator status update:
+    body = f"""PWP builder status update:
 
 Progress: {done}/{total} children done ({pct}%)
 In Progress: {in_prog}
@@ -258,7 +258,7 @@ In Progress: {in_prog}
 {json.dumps(summary, indent=2)}
 ```
 
-Auto-posted by prismatic-web-plugin orchestrator."""
+Auto-posted by prismatic-web-plugin builder."""
     q = """
     mutation($id: String!, $body: String!) {
       commentCreate(input: { issueId: $id, body: $body }) { success }
@@ -291,7 +291,7 @@ def print_status(epic_id: str):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="PWP orchestrator")
+    parser = argparse.ArgumentParser(description="PWP builder (pwb)")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_run = sub.add_parser("run", help="Run the full PWP pipeline")
