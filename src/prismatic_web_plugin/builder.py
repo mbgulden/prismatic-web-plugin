@@ -23,16 +23,19 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import subprocess
 import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-# The 3 pipeline steps live in this package as CLI scripts.
-# We invoke them via python -m so we don't need to refactor their main()s into library functions yet.
-# Future: refactor each into library + thin CLI wrapper for unit testing.
+# The 3 pipeline steps live in this package as library functions.
+# We import + call them directly (no subprocess). This is faster, testable,
+# and lets the orchestrator see structured return values instead of parsing CLI output.
+
+from .ingest import run_ingest
+from .synthesize import run_synthesize
+from .distill import run_distill
 
 PWP_HOME = Path(os.environ.get("PWP_HOME", "/home/ubuntu/work/prismatic-web-plugin"))
 OUTPUT_BASE = PWP_HOME / "output"
@@ -40,22 +43,7 @@ PROJECTS_BASE = Path(os.environ.get("PWP_PROJECTS_BASE", "/home/ubuntu/work"))
 SRC_DIR = PWP_HOME / "src"
 
 
-def _run_step(step: str, script: str, *args, env: dict | None = None) -> dict:
-    """Run a pipeline step as a subprocess and return parsed JSON output."""
-    cmd = [sys.executable, "-m", f"prismatic_web_plugin.{script}", *args]
-    full_env = os.environ.copy()
-    full_env["PYTHONPATH"] = str(SRC_DIR)
-    if env:
-        full_env.update(env)
-    log("step", f"Running {step}: {script}")
-    proc = subprocess.run(cmd, capture_output=True, text=True, env=full_env, cwd=str(PWP_HOME))
-    if proc.returncode != 0:
-        log("step", f"FAILED {step}: {proc.stderr[:500]}")
-        raise RuntimeError(f"{step} failed (exit {proc.returncode}): {proc.stderr[:500]}")
-    # Scripts output a JSON blob at the end - find the last JSON-looking block
-    output = proc.stdout
-    log("step", f"{step} ok")
-    return {"stdout": output, "stderr": proc.stderr}
+
 
 
 def load_env():
@@ -99,50 +87,61 @@ def run_pipeline(client_slug: str, *, skip_agy: bool = False, dry_run: bool = Fa
     output_dir = OUTPUT_BASE / client_slug
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Step 1: Ingest (uses the script via subprocess)
+    # Determine the input directory
+    okf_projects = Path("/home/ubuntu/work/growthwebdev-knowledge/okf/projects")
+    docs_dir = okf_projects / client_slug
+
+    # Step 1: Ingest (library call)
     log("pipeline", f"Step 1: Ingest for {client_slug}")
     try:
-        out = _run_step("ingest", "ingest", client_slug, "--out", str(output_dir))
-        result["stages"]["ingest"] = {"status": "ok", "output": out["stdout"][-500:]}
+        ingest_result = run_ingest(str(docs_dir), output_dir=output_dir, dry_run=dry_run)
+        if ingest_result["status"] == "error":
+            raise RuntimeError(ingest_result.get("error"))
+        result["stages"]["ingest"] = {
+            "status": "ok",
+            "output": ingest_result["paths"],
+            "missing_fields": ingest_result.get("missing_fields", []),
+        }
+        if ingest_result["status"] == "partial":
+            log("ingest", f"Partial: {len(ingest_result['missing_fields'])} missing fields")
     except Exception as e:
         log("ingest", f"FAILED: {e}")
         result["stages"]["ingest"] = {"status": "error", "error": str(e)}
         result["status"] = "failed"
         return result
 
-    # Step 2: Synthesize
+    # Step 2: Synthesize (library call)
     log("pipeline", f"Step 2: Synthesize for {client_slug}")
     try:
-        synth_args = [client_slug, "--out", str(output_dir)]
-        if skip_agy:
-            synth_args.append("--no-agy")
-        out = _run_step("synthesize", "synthesize", *synth_args)
-        result["stages"]["synthesize"] = {"status": "ok", "output": out["stdout"][-500:]}
+        profile_path = output_dir / "client_profile.json"
+        synth_result = run_synthesize(profile_path, output_dir=output_dir, skip_agy=skip_agy)
+        if synth_result["status"] == "error":
+            raise RuntimeError(synth_result.get("error"))
+        result["stages"]["synthesize"] = {
+            "status": "ok",
+            "word_count": synth_result["word_count"],
+            "path": synth_result["path"],
+        }
     except Exception as e:
         log("synthesize", f"FAILED: {e}")
         result["stages"]["synthesize"] = {"status": "error", "error": str(e)}
         result["status"] = "failed"
         return result
 
-    # Step 3: Distill
+    # Step 3: Distill (library call)
     log("pipeline", f"Step 3: Distill for {client_slug}")
     try:
-        out = _run_step("distill", "distill", client_slug, "--out", str(output_dir))
-        result["stages"]["distill"] = {"status": "ok", "output": out["stdout"][-500:]}
-        # Try to extract the epic_id and child_ids from the script's output
-        # The distill script outputs JSON at the end - try to find it
-        text = out["stdout"]
-        try:
-            # Find the last JSON blob
-            for line in reversed(text.split("\n")):
-                line = line.strip()
-                if line.startswith("{") and line.endswith("}"):
-                    distill_data = json.loads(line)
-                    result["epic_id"] = distill_data.get("epic_id")
-                    result["child_ids"] = distill_data.get("child_ids", [])
-                    break
-        except (json.JSONDecodeError, KeyError):
-            pass
+        plan_path = output_dir / "website_build_plan.md"
+        distill_result = run_distill(plan_path, dry_run=dry_run)
+        if distill_result["status"] == "error":
+            raise RuntimeError(distill_result.get("error"))
+        result["stages"]["distill"] = {
+            "status": "ok",
+            "epic_id": distill_result["epic_id"],
+            "child_ids": distill_result.get("child_ids", []),
+        }
+        result["epic_id"] = distill_result["epic_id"]
+        result["child_ids"] = distill_result.get("child_ids", [])
     except Exception as e:
         log("distill", f"FAILED: {e}")
         result["stages"]["distill"] = {"status": "error", "error": str(e)}

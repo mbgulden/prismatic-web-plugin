@@ -1,290 +1,250 @@
-#!/usr/bin/env python3
 """
-pwp_ingest.py — Step 1 of the Prismatic Web Plugin system.
+PWP Ingest - parses any client's 5 Website Dev Framework docs into structured JSON.
 
-Reads any client's 5 Website Dev docs (the content-gathering framework)
-and produces structured JSON output:
-  - client_profile.json: business name, mission, USP, location, contact
-  - content_brief.json: classes, testimonials, lead magnet, automation
-  - ingest_report.md: what was parsed, what was missing/invalid
+Library API:
+    from prismatic_web_plugin.ingest import run_ingest
+    result = run_ingest(docs_dir, output_dir=None, dry_run=False)
+    # Returns: dict with keys: client_profile, content_brief, report, missing_fields, paths
 
-Uses AGY (Gemini 3.5 Flash High) to extract structured data from the docs.
-The 5 docs are NOT uniform templates — they're conversational guides, so
-the parser uses LLM-based extraction.
-
-Usage:
-    python3 pwp_ingest.py <path-to-5-docs-dir>
-
-Output:
-    <docs-dir>/output/<client-slug>/{client_profile.json,content_brief.json,ingest_report.md}
+CLI:
+    python -m prismatic_web_plugin.ingest <docs-dir> [--out DIR] [--dry-run]
 """
-import os, sys, json, re, subprocess, time
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
 from pathlib import Path
-from datetime import datetime, timezone
+from typing import Any
 
-# The 5 framework docs, in canonical order
+# Framework docs to look for (5 canonical names)
 FRAMEWORK_DOCS = [
-    ("01_business_core", "Doc 1: Business Core & Mission + Classes Directory"),
-    ("02_partner_story", "Doc 2: Partner Interview & Story Extraction"),
-    ("03_brand_design", "Doc 3: Brand Design Interview & Inspiration Directory"),
-    ("04_launch_kit", "Doc 4: Conversion & Technical Launch Kit"),
-    ("05_post_purchase", "Doc 5: Post-Purchase Automation Flow"),
+    ("content_gathering_guide", "Content Gathering Guide"),
+    ("partner_interview", "Partner Interview"),
+    ("brand_design_interview", "Brand & Design Interview"),
+    ("conversion_launch_kit", "Conversion & Launch Kit"),
+    ("post_purchase_automation", "Post-Purchase Automation"),
 ]
 
-# Output schema (the structured client profile)
+# Schema for client_profile.json
 CLIENT_PROFILE_SCHEMA = {
     "client_profile": {
         "name": "",
-        "tagline": "",
         "mission": "",
-        "usp": "",
-        "core_values": [],
-        "location": {"city": "", "state": "", "service_areas": []},
-        "contact": {"phone": "", "email": "", "address": ""},
-        "instructors": [],
+        "values": [],
+        "service_area": "",
+        "instructor_bio": "",
+        "differentiators": [],
+    },
+    "brand": {
+        "colors": {
+            "primary": "#1E293B",
+            "secondary": "#78866B",
+            "accent": "#C87971",
+            "neutral_light": "#F8FAFC",
+            "neutral_dark": "#334155",
+        },
+        "typography": {
+            "heading_font": "Outfit",
+            "body_font": "Inter",
+        },
+        "mood": [],
     },
     "content": {
-        "classes": [],  # list of {slug, title, summary, what_you_learn, prerequisites, gear, duration, price, call_to_action}
-        "testimonials": [],  # list of {author, quote, date}
-        "affiliations": [],  # list of org names
-        "lead_magnet": {"title": "", "topics": []},  # title + list of topics
-    },
-    "design": {
-        "color_palette": [],
-        "typography": "",
-        "mood": "",
-        "reference_sites": [],
-    },
-    "technical": {
-        "target_areas": [],
-        "domain": "",
-        "google_business": "",
-        "has_logo": False,
+        "classes": [],
+        "lead_magnets": [],
+        "case_studies": [],
     },
     "automation": {
         "email_sequences": [],
+        "post_purchase_flows": [],
+    },
+    "tech": {
+        "platform": "",
+        "domain": "",
+        "analytics": "",
     },
 }
 
+
 def slugify(s: str) -> str:
-    """Convert a name to a filesystem-safe slug."""
+    """Convert a string to a URL-safe slug."""
     s = s.lower().strip()
-    s = re.sub(r"[^a-z0-9\s-]", "", s)
-    s = re.sub(r"[\s-]+", "-", s).strip("-")
-    return s or "client"
+    s = re.sub(r"[^\w\s-]", "", s)
+    s = re.sub(r"[\s_]+", "-", s)
+    s = re.sub(r"-+", "-", s)
+    return s.strip("-")
+
 
 def read_doc(path: Path) -> str:
-    """Read a doc and return its body (skip frontmatter)."""
-    if not path.exists():
-        return ""
-    content = path.read_text(encoding="utf-8")
-    # Strip YAML frontmatter
-    if content.startswith("---"):
-        end = content.find("---", 3)
-        if end > 0:
-            content = content[end + 3:].strip()
-    return content
+    """Read a doc file, return contents (handles encoding)."""
+    try:
+        return path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return path.read_text(encoding="latin-1")
+
 
 def find_5_docs(docs_dir: Path) -> dict:
-    """Find the 5 framework docs in the input directory. Returns dict keyed by canonical name."""
-    found = {}
-    # Search for files matching the 5 patterns
-    patterns = [
-        ("01_business_core", ["Doc_1", "Document_1", "01_Business_Core", "company_profile", "class_"]),
-        ("02_partner_story", ["Doc_2", "Document_2", "02_Partner_Interview", "partner_story", "partner_interview"]),
-        ("03_brand_design", ["Doc_3", "Document_3", "03_Brand_Design", "brand_design"]),
-        ("04_launch_kit", ["Doc_4", "Document_4", "04_Conversion", "04_Launch_Kit", "conversion"]),
-        ("05_post_purchase", ["Doc_5", "Document_5", "05_Post_Purchase", "post_purchase"]),
-    ]
-    for canonical_name, aliases in patterns:
-        # Try exact patterns first
-        for f in docs_dir.iterdir():
-            if not f.is_file() or not f.suffix.lower() in [".md", ".txt"]:
-                continue
-            fname = f.name
-            for alias in aliases:
-                if alias.lower() in fname.lower():
-                    found[canonical_name] = f
-                    break
-            if canonical_name in found:
+    """Find the 5 framework docs in a directory by name pattern matching.
+
+    Returns: dict mapping canonical_name -> Path
+    """
+    docs = {}
+    if not docs_dir.exists():
+        return docs
+
+    # Patterns: "Doc 1 - Content Gathering" or "content_gathering" or "content-gathering"
+    for path in docs_dir.iterdir():
+        if not path.is_file():
+            continue
+        name = path.stem.lower()
+        for canonical, _ in FRAMEWORK_DOCS:
+            # Match: "doc_1_-_content_gathering_guide" or "content_gathering_guide"
+            if canonical in name or canonical.replace("_", "-") in name or canonical.replace("_", " ") in name:
+                if canonical not in docs:  # take first match
+                    docs[canonical] = path
                 break
-    return found
+    return docs
+
 
 def extract_with_agy(docs: dict) -> dict:
-    """Use AGY (Gemini 3.5 Flash High) to extract structured data from the 5 docs."""
+    """Use AGY to extract structured data from the 5 docs."""
+    # Combine all docs into one prompt
+    docs_text = ""
+    for canonical, path in docs.items():
+        content = read_doc(path)[:8000]  # truncate per doc to fit context
+        docs_text += f"\n\n=== {canonical} ===\n{content}\n"
 
-    # Build the prompt
-    prompt_parts = [
-        "You are a structured-data extraction assistant.",
-        "Read the 5 website content gathering docs below and extract a comprehensive client profile as JSON.",
-        "Output ONLY valid JSON — no commentary, no markdown, no explanation.",
-        "",
-        "Use this exact schema (fill in what you find, leave empty if not present):",
-        json.dumps(CLIENT_PROFILE_SCHEMA, indent=2),
-        "",
-        "IMPORTANT notes about the schema:",
-        "- `content.classes` is a LIST OF OBJECTS, not strings. Each class needs:",
-        '  {"slug": "kebab-case-name", "title": "Class Title", "summary": "1-paragraph", "what_you_learn": ["skill 1", "skill 2"], "prerequisites": "...", "gear": "...", "duration": "4 hours", "price": "$125", "call_to_action": "Reserve Your Spot"}',
-        "- `content.testimonials` is a LIST OF OBJECTS:",
-        '  {"author": "Name", "quote": "the review text", "date": "YYYY-MM-DD"}',
-        "- `content.lead_magnet.topics` is a LIST OF STRINGS (the topics covered)",
-        "- `automation.email_sequences` is a LIST OF OBJECTS:",
-        '  {"name": "Email 1: Confirmation", "trigger": "post-purchase", "subject": "...", "body": "..."}',
-        "- If a field's not in the docs, use empty string, empty list, or empty object — NEVER null",
-        "",
-        "DOCS:",
-        "",
-    ]
+    prompt = (
+        "You are parsing a client's 5 Website Development Framework documents. "
+        "Extract structured data and return ONLY valid JSON (no markdown, no commentary). "
+        "Use the keys: client_profile (name, mission, values, service_area, instructor_bio, differentiators), "
+        "brand (colors, typography, mood), content (classes, lead_magnets, case_studies), "
+        "automation (email_sequences, post_purchase_flows), tech (platform, domain, analytics). "
+        "If a field isn't in the docs, use an empty string or empty list. "
+        "Output ONLY the JSON object.\n\n"
+        f"DOCUMENTS:\n{docs_text}"
+    )
 
-    for canonical_name, description in FRAMEWORK_DOCS:
-        if canonical_name in docs:
-            content = read_doc(docs[canonical_name])
-            prompt_parts.append(f"=== {description} ===")
-            prompt_parts.append(content[:8000])  # truncate to fit context
-            prompt_parts.append("")
-
-    prompt_parts.append("")
-    prompt_parts.append("Output the JSON now (only the JSON, nothing else):")
-
-    prompt = "\n".join(prompt_parts)
-
-    # Call AGY
     result = subprocess.run(
         [
             "/home/ubuntu/.local/bin/agy",
             "--model", "Gemini 3.5 Flash (High)",
             "--prompt", prompt,
-            "--print-timeout", "5m0s",
             "--dangerously-skip-permissions",
+            "--print-timeout", "3m0s",
         ],
         capture_output=True,
         text=True,
-        timeout=300,
+        timeout=240,
     )
 
     if result.returncode != 0:
-        print(f"AGY error: {result.stderr}", file=sys.stderr)
+        print(f"  AGY error: {result.stderr[:300]}", file=sys.stderr)
         return {}
 
-    # Parse the output (look for JSON in the response)
     output = result.stdout.strip()
-    # Try to find JSON in the output
-    json_match = re.search(r"\{[\s\S]*\}", output)
-    if json_match:
-        try:
-            return json.loads(json_match.group(0))
-        except json.JSONDecodeError as e:
-            print(f"JSON parse error: {e}", file=sys.stderr)
-            print(f"Output was: {output[:500]}", file=sys.stderr)
-            return {}
-    print(f"No JSON found in AGY output: {output[:500]}", file=sys.stderr)
+    # Strip any leading/trailing markdown code fences
+    output = re.sub(r"^```(?:json)?\s*\n", "", output, flags=re.IGNORECASE)
+    output = re.sub(r"\n```\s*$", "", output)
+
+    # Try to find JSON
+    try:
+        return json.loads(output)
+    except json.JSONDecodeError:
+        # Try to find a JSON block
+        for line in output.split("\n"):
+            if line.strip().startswith("{") and line.strip().endswith("}"):
+                try:
+                    return json.loads(line)
+                except json.JSONDecodeError:
+                    continue
     return {}
 
-def write_ingest_report(report_path: Path, docs: dict, extracted: dict, missing: list):
-    """Write the ingest_report.md summarizing what was found and what's missing."""
-    lines = [
-        f"# Ingest Report — {datetime.now(timezone.utc).isoformat()}",
-        "",
-        "## Docs found",
-        "",
-    ]
-    for canonical_name, description in FRAMEWORK_DOCS:
-        if canonical_name in docs:
-            lines.append(f"- ✓ {description}: `{docs[canonical_name].name}`")
-        else:
-            lines.append(f"- ✗ {description}: **NOT FOUND**")
 
-    lines.extend([
-        "",
-        "## Extracted data",
-        "",
-    ])
+def write_ingest_report(report_path: Path, docs: dict, extracted: dict, missing: list):
+    """Write the human-readable ingest report."""
+    lines = ["# Ingest Report\n"]
+    lines.append(f"## Documents Found: {len(docs)}/5\n")
+    for canonical, description in FRAMEWORK_DOCS:
+        status = "✓" if canonical in docs else "✗"
+        lines.append(f"- {status} {description}")
+    lines.append("")
+
     if extracted:
-        profile = extracted.get("client_profile", {})
-        lines.append(f"- **Business name:** {profile.get('name', 'MISSING')}")
-        lines.append(f"- **Tagline:** {profile.get('tagline', 'MISSING')}")
-        lines.append(f"- **Mission:** {profile.get('mission', 'MISSING')[:200]}{'...' if len(profile.get('mission', '')) > 200 else ''}")
-        lines.append(f"- **USP:** {profile.get('usp', 'MISSING')[:200]}{'...' if len(profile.get('usp', '')) > 200 else ''}")
-        lines.append(f"- **Core values:** {', '.join(profile.get('core_values', [])) or 'MISSING'}")
-        loc = profile.get("location", {})
-        lines.append(f"- **Location:** {loc.get('city', '?')}, {loc.get('state', '?')}")
-        lines.append(f"- **Service areas:** {', '.join(loc.get('service_areas', [])) or 'MISSING'}")
-        content = extracted.get("content", {})
-        lines.append(f"- **Classes:** {len(content.get('classes', []))} found")
-        lines.append(f"- **Testimonials:** {len(content.get('testimonials', []))} found")
-        lines.append(f"- **Affiliations:** {', '.join(content.get('affiliations', [])) or 'MISSING'}")
-        lm = content.get("lead_magnet", {})
-        lines.append(f"- **Lead magnet:** {lm.get('title', 'MISSING')}")
-        lines.append(f"- **Email sequences:** {len(extracted.get('automation', {}).get('email_sequences', []))} found")
-        design = extracted.get("design", {})
-        lines.append(f"- **Mood:** {design.get('mood', 'MISSING')}")
-        lines.append(f"- **Reference sites:** {len(design.get('reference_sites', []))} found")
-    else:
-        lines.append("- **EXTRACTION FAILED** — see errors above")
+        lines.append("## Extracted Data Summary\n")
+        cp = extracted.get("client_profile", {})
+        lines.append(f"- **Client Name**: {cp.get('name', '(not set)')}")
+        lines.append(f"- **Mission**: {(cp.get('mission') or '')[:100]}")
+        lines.append(f"- **Service Area**: {cp.get('service_area', '(not set)')}")
+        lines.append(f"- **Classes**: {len(extracted.get('content', {}).get('classes', []))}")
+        lines.append(f"- **Lead Magnets**: {len(extracted.get('content', {}).get('lead_magnets', []))}")
+        lines.append(f"- **Email Sequences**: {len(extracted.get('automation', {}).get('email_sequences', []))}")
+        lines.append(f"- **Post-Purchase Flows**: {len(extracted.get('automation', {}).get('post_purchase_flows', []))}")
+        lines.append("")
 
     if missing:
-        lines.extend([
-            "",
-            "## Missing / incomplete data",
-            "",
-        ])
+        lines.append("## Missing Required Fields\n")
         for m in missing:
             lines.append(f"- {m}")
+        lines.append("")
 
     report_path.write_text("\n".join(lines), encoding="utf-8")
 
-def main():
-    if len(sys.argv) != 2:
-        print("Usage: python3 pwp_ingest.py <path-to-5-docs-dir>", file=sys.stderr)
-        sys.exit(1)
 
-    docs_dir = Path(sys.argv[1]).resolve()
+# ── Library API ──────────────────────────────────────────────
+
+def run_ingest(
+    docs_dir: str | Path,
+    output_dir: str | Path | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Library API: parse 5 docs and return structured data.
+
+    Args:
+        docs_dir: Path to the directory containing the 5 Website Dev docs
+        output_dir: Where to write the output files. Defaults to <docs_dir>/output/<slug>/
+        dry_run: If True, don't write any files
+
+    Returns:
+        dict with keys:
+            - client_profile: dict
+            - content_brief: dict
+            - report_path: Path or None
+            - paths: dict of written file paths
+            - missing_fields: list of strings (empty if all required fields present)
+            - status: "ok" | "partial" | "error"
+            - error: string (if status == "error")
+    """
+    docs_dir = Path(docs_dir).resolve()
     if not docs_dir.is_dir():
-        print(f"Error: {docs_dir} is not a directory", file=sys.stderr)
-        sys.exit(1)
+        return {"status": "error", "error": f"{docs_dir} is not a directory"}
 
-    print(f"Ingesting from: {docs_dir}")
-
-    # Find the 5 docs
     docs = find_5_docs(docs_dir)
     if not docs:
-        print(f"Error: no docs found matching the 5 framework patterns", file=sys.stderr)
-        sys.exit(2)
+        return {"status": "error", "error": "no docs found matching the 5 framework patterns"}
 
-    print(f"Found {len(docs)}/5 docs:")
-    for canonical_name, description in FRAMEWORK_DOCS:
-        status = "✓" if canonical_name in docs else "✗"
-        print(f"  {status} {description}")
-
-    # Extract structured data
-    print("\nExtracting structured data with AGY...")
     extracted = extract_with_agy(docs)
     if not extracted:
-        print("Error: extraction failed", file=sys.stderr)
-        sys.exit(3)
+        return {"status": "error", "error": "AGY extraction failed"}
 
-    # Determine client slug from name
-    client_name = extracted.get("client_profile", {}).get("name", "")
-    if not client_name:
-        client_name = docs_dir.name
+    client_name = extracted.get("client_profile", {}).get("name", "") or docs_dir.name
     slug = slugify(client_name)
 
-    # Output directory
-    out_dir = docs_dir / "output" / slug
-    out_dir.mkdir(parents=True, exist_ok=True)
+    if output_dir is None:
+        output_dir = docs_dir / "output" / slug
+    output_dir = Path(output_dir)
+    if not dry_run:
+        output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Write outputs
-    profile_path = out_dir / "client_profile.json"
-    brief_path = out_dir / "content_brief.json"
-    report_path = out_dir / "ingest_report.md"
-
-    # Merge into the schema (preserve defaults, override with extracted)
     final = {**CLIENT_PROFILE_SCHEMA, **extracted}
+    profile_path = output_dir / "client_profile.json"
+    brief_path = output_dir / "content_brief.json"
+    report_path = output_dir / "ingest_report.md"
 
-    profile_path.write_text(json.dumps(final, indent=2), encoding="utf-8")
-    brief_path.write_text(json.dumps(final.get("content", {}), indent=2), encoding="utf-8")
-
-    # Check for missing required fields
     missing = []
     required = [
         ("client_profile.name", final.get("client_profile", {}).get("name")),
@@ -296,19 +256,59 @@ def main():
         if not val or (isinstance(val, list) and len(val) == 0):
             missing.append(f"`{path}` is empty — follow up with client")
 
-    write_ingest_report(report_path, docs, final, missing)
+    if not dry_run:
+        profile_path.write_text(json.dumps(final, indent=2), encoding="utf-8")
+        brief_path.write_text(json.dumps(final.get("content", {}), indent=2), encoding="utf-8")
+        write_ingest_report(report_path, docs, final, missing)
 
-    print(f"\nWrote:")
-    print(f"  {profile_path}")
-    print(f"  {brief_path}")
-    print(f"  {report_path}")
-    if missing:
+    return {
+        "status": "ok" if not missing else "partial",
+        "client_profile": final.get("client_profile", {}),
+        "content_brief": final.get("content", {}),
+        "report_path": str(report_path) if not dry_run else None,
+        "paths": {
+            "profile": str(profile_path) if not dry_run else None,
+            "brief": str(brief_path) if not dry_run else None,
+            "report": str(report_path) if not dry_run else None,
+        },
+        "missing_fields": missing,
+        "docs_found": list(docs.keys()),
+    }
+
+
+# ── CLI ──────────────────────────────────────────────
+
+def main():
+    parser = argparse.ArgumentParser(description="PWP Ingest - parse 5 Website Dev docs into structured JSON")
+    parser.add_argument("docs_dir", help="Path to the directory containing the 5 Website Dev docs")
+    parser.add_argument("--out", default=None, help="Output directory (default: <docs_dir>/output/<slug>/)")
+    parser.add_argument("--dry-run", action="store_true", help="Don't write any output files")
+    args = parser.parse_args()
+
+    result = run_ingest(args.docs_dir, output_dir=args.out, dry_run=args.dry_run)
+
+    if result["status"] == "error":
+        print(f"Error: {result.get('error')}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"\nClient: {result['client_profile'].get('name')}")
+    print(f"Slug: {result['paths'].get('profile', '').rsplit('/', 2)[-2] if result['paths'].get('profile') else 'N/A'}")
+    print(f"Status: {result['status']}")
+    if result.get("missing_fields"):
         print(f"\nMissing required fields:")
-        for m in missing:
+        for m in result["missing_fields"]:
             print(f"  - {m}")
-        sys.exit(4)  # partial success
 
-    print("\n✓ Ingest complete (all required fields present)")
+    if result.get("paths", {}).get("profile"):
+        print(f"\nWrote:")
+        for k, v in result["paths"].items():
+            if v:
+                print(f"  {v}")
+
+    if result["status"] == "partial":
+        sys.exit(2)
+    sys.exit(0)
+
 
 if __name__ == "__main__":
     main()
