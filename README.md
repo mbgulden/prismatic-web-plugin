@@ -4,6 +4,10 @@
 
 ## What this is
 
+
+
+> **Naming note:** The sub-tool inside the PWP package is called **Prismatic Web Builder** (CLI: `pwb`). It's NOT called "orchestrator" because "orchestrator" already means the human/agent that runs the PWP (you, me, or whoever is operating the system). The Builder is the system; the Orchestrator is the operator.
+
 The Prismatic Web Plugin (PWP) is the **system** that:
 
 1. **Ingests** any client's completed Website Content Gathering Framework (the 5 Drive docs)
@@ -21,13 +25,13 @@ The Prismatic Web Plugin (PWP) is the **system** that:
 pip install -e .
 
 # Run the full pipeline on a new client
-pwp run --client meridian-womens-defense
+pwb run --client meridian-womens-defense
 
 # Watch a running build
-pwp watch --epic <epic-uuid>
+pwb watch --epic <epic-uuid>
 
 # Print status
-pwp status --epic <epic-uuid>
+pwb status --epic <epic-uuid>
 ```
 
 ## Pipeline stages
@@ -41,7 +45,7 @@ pwp status --epic <epic-uuid>
 | 5. Build | (agent swarm) | Pages + assets + Result.md | Live |
 | 6. Review | (AGY pro + Fred) | Sign-off on each task | Live |
 | 7. Deploy | (Ned) | Cloudflare Pages site | Live |
-| 8. Document | (this orchestrator) | OKF handoff package | Todo |
+| 8. Document | (the builder) | OKF handoff package | Todo |
 
 ## Status
 
@@ -57,7 +61,7 @@ prismatic-web-plugin/
 ├── src/
 │   └── prismatic_web_plugin/
 │       ├── __init__.py
-│       ├── orchestrator.py    # The system (this build)
+│       ├── builder.py         # The system (this build)
 │       ├── ingest.py          # Step 1
 │       ├── synthesize.py      # Step 2
 │       ├── distill.py         # Step 3
