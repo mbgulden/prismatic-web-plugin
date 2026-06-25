@@ -12,7 +12,6 @@ Tests:
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -27,12 +26,10 @@ from prismatic_web_plugin.distill import (
     issue_for_deploy,
     issue_for_design,
     issue_for_page,
-    load_api_key,
     lookup_labels,
     parse_build_plan,
     run_distill,
 )
-
 
 # ─────────────────────────────────────────────────────────────────────
 # parse_build_plan

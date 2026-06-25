@@ -10,20 +10,19 @@ Tests:
 """
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
 from prismatic_web_plugin.ingest import (
+    extract_with_agy,
     find_5_docs,
     read_doc,
     run_ingest,
     slugify,
     write_ingest_report,
 )
-
 
 # ─────────────────────────────────────────────────────────────────────
 # slugify
@@ -56,6 +55,11 @@ class TestReadDoc:
         with pytest.raises(FileNotFoundError):
             read_doc(tmp_path / "missing.md")
 
+    def test_read_doc_latin1_fallback(self, tmp_path: Path):
+        f = tmp_path / "latin1.md"
+        f.write_bytes(b"\xe9")  # é in latin-1 (invalid in UTF-8)
+        assert read_doc(f) == "\xe9"
+
 
 # ─────────────────────────────────────────────────────────────────────
 # find_5_docs
@@ -85,6 +89,25 @@ class TestFind5Docs:
         docs = find_5_docs(tmp_path / "does-not-exist")
         assert docs == {}
 
+    def test_find_5_docs_ignores_dir(self, tmp_path: Path):
+        okf = tmp_path / "okf"
+        okf.mkdir()
+        (okf / "content_gathering_guide.md").mkdir()  # directory instead of file
+        docs = find_5_docs(okf)
+        assert "content_gathering_guide" not in docs
+
+    def test_find_5_docs_first_match(self, tmp_path: Path):
+        okf = tmp_path / "okf"
+        okf.mkdir()
+        f1 = okf / "content_gathering_guide.md"
+        f1.write_text("first")
+        f2 = okf / "content_gathering_guide_new.md"
+        f2.write_text("second")
+        # Ensure it returns the first matched path based on mock iterdir order
+        with patch.object(Path, "iterdir", return_value=[f1, f2]):
+            docs = find_5_docs(okf)
+            assert docs.get("content_gathering_guide") == f1
+
 
 # ─────────────────────────────────────────────────────────────────────
 # write_ingest_report
@@ -106,6 +129,14 @@ class TestWriteIngestReport:
         assert "Ingest Report" in text
         assert "Test Client" in text
         assert "content_gathering_guide" in text or "Content Gathering" in text
+
+    def test_writes_markdown_report_empty_extracted(self, tmp_path: Path):
+        report_path = tmp_path / "ingest-report.md"
+        write_ingest_report(report_path, {}, {}, ["missing field"])
+        assert report_path.exists()
+        text = report_path.read_text()
+        assert "Ingest Report" in text
+        assert "missing field" in text
 
 
 # ─────────────────────────────────────────────────────────────────────
@@ -137,3 +168,153 @@ class TestRunIngest:
     def test_missing_dir_returns_error_status(self, tmp_path: Path):
         result = run_ingest(docs_dir=tmp_path / "missing", output_dir=tmp_path, dry_run=True)
         assert result["status"] == "error"
+
+    def test_run_ingest_no_docs_found(self, tmp_path: Path):
+        okf = tmp_path / "okf"
+        okf.mkdir()
+        result = run_ingest(docs_dir=okf, output_dir=tmp_path, dry_run=True)
+        assert result["status"] == "error"
+        assert "no docs found" in result["error"]
+
+    def test_run_ingest_agy_fails(self, tmp_path: Path):
+        with patch("prismatic_web_plugin.ingest.extract_with_agy", return_value={}):
+            okf = tmp_path / "okf"
+            okf.mkdir()
+            (okf / "content_gathering_guide.md").write_text("c")
+            (okf / "partner_interview.md").write_text("p")
+            (okf / "brand_design_interview.md").write_text("b")
+            (okf / "conversion_launch_kit.md").write_text("cv")
+            (okf / "post_purchase_automation.md").write_text("pp")
+
+            result = run_ingest(docs_dir=okf, output_dir=tmp_path, dry_run=True)
+            assert result["status"] == "error"
+            assert "AGY extraction failed" in result["error"]
+
+    def test_run_ingest_output_dir_default(self, tmp_path: Path):
+        with patch("prismatic_web_plugin.ingest.extract_with_agy") as mock_extract:
+            mock_extract.return_value = {
+                "client_profile": {"name": "Default Output Client"},
+            }
+            okf = tmp_path / "okf"
+            okf.mkdir()
+            (okf / "content_gathering_guide.md").write_text("c")
+            (okf / "partner_interview.md").write_text("p")
+            (okf / "brand_design_interview.md").write_text("b")
+            (okf / "conversion_launch_kit.md").write_text("cv")
+            (okf / "post_purchase_automation.md").write_text("pp")
+
+            result = run_ingest(docs_dir=okf, dry_run=True)
+            assert result["status"] == "partial"
+            assert result["paths"]["profile"] is None
+
+    def test_run_ingest_writes_files_when_not_dry_run(self, tmp_path: Path):
+        with patch("prismatic_web_plugin.ingest.extract_with_agy") as mock_extract:
+            mock_extract.return_value = {
+                "client_profile": {"name": "Write Files Client"},
+            }
+            okf = tmp_path / "okf"
+            okf.mkdir()
+            (okf / "content_gathering_guide.md").write_text("c")
+            (okf / "partner_interview.md").write_text("p")
+            (okf / "brand_design_interview.md").write_text("b")
+            (okf / "conversion_launch_kit.md").write_text("cv")
+            (okf / "post_purchase_automation.md").write_text("pp")
+
+            out_dir = tmp_path / "out"
+            result = run_ingest(docs_dir=okf, output_dir=out_dir, dry_run=False)
+            assert result["status"] == "partial"
+            assert Path(result["paths"]["profile"]).exists()
+            assert Path(result["paths"]["brief"]).exists()
+            assert Path(result["paths"]["report"]).exists()
+
+
+# ─────────────────────────────────────────────────────────────────────
+# extract_with_agy
+# ─────────────────────────────────────────────────────────────────────
+
+class TestExtractWithAgy:
+    @patch("subprocess.run")
+    def test_extract_success(self, mock_run, tmp_path: Path):
+        mock_run.return_value = MagicMock(returncode=0, stdout='{"client_profile": {"name": "Test"}}', stderr="")
+        docs = {"content_gathering_guide": tmp_path / "content_gathering_guide.md"}
+        docs["content_gathering_guide"].write_text("content")
+        res = extract_with_agy(docs)
+        assert res == {"client_profile": {"name": "Test"}}
+
+    @patch("subprocess.run")
+    def test_extract_error(self, mock_run, tmp_path: Path):
+        mock_run.return_value = MagicMock(returncode=1, stdout="", stderr="some error")
+        docs = {"content_gathering_guide": tmp_path / "content_gathering_guide.md"}
+        docs["content_gathering_guide"].write_text("content")
+        res = extract_with_agy(docs)
+        assert res == {}
+
+    @patch("subprocess.run")
+    def test_extract_json_markdown_blocks(self, mock_run, tmp_path: Path):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout='```json\n{"client_profile": {"name": "Markdown JSON"}}\n```',
+            stderr=""
+        )
+        docs = {"content_gathering_guide": tmp_path / "content_gathering_guide.md"}
+        docs["content_gathering_guide"].write_text("content")
+        res = extract_with_agy(docs)
+        assert res == {"client_profile": {"name": "Markdown JSON"}}
+
+    @patch("subprocess.run")
+    def test_extract_invalid_json_fallback(self, mock_run, tmp_path: Path):
+        mock_run.return_value = MagicMock(
+            returncode=0,
+            stdout='some commentary\n{"client_profile": {"name": "Fallback JSON"}}\nmore commentary',
+            stderr=""
+        )
+        docs = {"content_gathering_guide": tmp_path / "content_gathering_guide.md"}
+        docs["content_gathering_guide"].write_text("content")
+        res = extract_with_agy(docs)
+        assert res == {"client_profile": {"name": "Fallback JSON"}}
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Ingest CLI
+# ─────────────────────────────────────────────────────────────────────
+
+class TestIngestCLI:
+    def test_cli_success(self, tmp_path: Path):
+        with patch("sys.argv", ["pwb-ingest", str(tmp_path), "--out", str(tmp_path / "out")]), \
+             patch("prismatic_web_plugin.ingest.run_ingest") as mock_run:
+            mock_run.return_value = {
+                "status": "ok",
+                "client_profile": {"name": "CLI Client"},
+                "paths": {"profile": "/path/to/profile.json", "brief": "/path/to/brief.json", "report": "/path/to/report.md"},
+                "missing_fields": []
+            }
+            from prismatic_web_plugin.ingest import main as ingest_main
+            with pytest.raises(SystemExit) as exc_info:
+                ingest_main()
+            assert exc_info.value.code == 0
+
+    def test_cli_partial(self, tmp_path: Path):
+        with patch("sys.argv", ["pwb-ingest", str(tmp_path), "--dry-run"]), \
+             patch("prismatic_web_plugin.ingest.run_ingest") as mock_run:
+            mock_run.return_value = {
+                "status": "partial",
+                "client_profile": {"name": "CLI Client"},
+                "paths": {},
+                "missing_fields": ["`content.classes` is empty"]
+            }
+            from prismatic_web_plugin.ingest import main as ingest_main
+            with pytest.raises(SystemExit) as exc_info:
+                ingest_main()
+            assert exc_info.value.code == 2
+
+    def test_cli_error(self, tmp_path: Path):
+        with patch("sys.argv", ["pwb-ingest", str(tmp_path)]), \
+             patch("prismatic_web_plugin.ingest.run_ingest") as mock_run:
+            mock_run.return_value = {
+                "status": "error",
+                "error": "some error"
+            }
+            from prismatic_web_plugin.ingest import main as ingest_main
+            with pytest.raises(SystemExit) as exc_info:
+                ingest_main()
+            assert exc_info.value.code == 1

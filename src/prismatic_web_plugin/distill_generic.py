@@ -5,7 +5,11 @@ pwp_distill_generic.py — Generic version of Step 3 that works on any project t
 Like pwp_distill.py but adapts issue templates based on the project type
 and uses the synthesis.md + profile.json as input.
 """
-import os, sys, json, re, subprocess, argparse
+import argparse
+import json
+import os
+import re
+import sys
 from pathlib import Path
 
 # Linear setup (same as pwp_distill.py)

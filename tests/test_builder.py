@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -23,7 +23,6 @@ from prismatic_web_plugin.builder import (
     _epic_status,
     run_pipeline,
 )
-
 
 # ─────────────────────────────────────────────────────────────────────
 # run_pipeline (mocked library calls)

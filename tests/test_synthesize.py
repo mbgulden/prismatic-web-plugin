@@ -23,7 +23,6 @@ from prismatic_web_plugin.synthesize import (
     synthesize_stub,
 )
 
-
 # ─────────────────────────────────────────────────────────────────────
 # slugify (re-exported in synthesize)
 # ─────────────────────────────────────────────────────────────────────
