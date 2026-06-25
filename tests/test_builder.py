@@ -82,9 +82,9 @@ class TestRunPipeline:
         # Patch Path so /home/ubuntu/work/growthwebdev-knowledge resolves to fake_okf
         # Instead, just patch the docs_dir construction by mocking run_ingest directly
 
-        with patch.object(builder, "run_ingest", return_value=_ok_ingest(tmp_path)) as m_ingest, \
-             patch.object(builder, "run_synthesize", return_value=_ok_synthesize(tmp_path)) as m_synth, \
-             patch.object(builder, "run_distill", return_value=_ok_distill()) as m_distill:
+        with patch.object(builder, "run_ingest", return_value=_ok_ingest(tmp_path)), \
+             patch.object(builder, "run_synthesize", return_value=_ok_synthesize(tmp_path)), \
+             patch.object(builder, "run_distill", return_value=_ok_distill()):
             result = run_pipeline("test-client", skip_agy=False, dry_run=False)
 
         assert result["status"] == "ok"
@@ -99,7 +99,7 @@ class TestRunPipeline:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
         monkeypatch.setattr(builder, "OUTPUT_BASE", tmp_path)
-        with patch.object(builder, "run_ingest", return_value={"status": "error", "error": "no docs"}) as m_ingest, \
+        with patch.object(builder, "run_ingest", return_value={"status": "error", "error": "no docs"}), \
              patch.object(builder, "run_synthesize") as m_synth, \
              patch.object(builder, "run_distill") as m_distill:
             result = run_pipeline("test-client")

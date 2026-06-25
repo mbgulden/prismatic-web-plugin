@@ -90,7 +90,7 @@ def extract_tasks(synthesis_text: str) -> list:
     return list(dict.fromkeys(tasks))[:30]  # cap at 30 tasks
 
 def create_issue(title, description, labels, priority, parent_id=None):
-    label_ids = [LABELS[l] for l in labels if LABELS.get(l)]
+    label_ids = [LABELS[lbl] for lbl in labels if LABELS.get(lbl)]
     if not label_ids:
         label_ids = [LABELS["agent:fred"]]
     input_data = {

@@ -302,7 +302,6 @@ class TestLoadApiKey:
             pass
         # Just call the function — the Path class is imported at module level
         # We need a different approach: rewrite the function temporarily
-        original = distill.load_api_key
 
         def patched():
             return "lin_api_TEST_KEY_123"
