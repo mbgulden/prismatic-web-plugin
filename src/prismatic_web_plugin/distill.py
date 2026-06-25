@@ -13,12 +13,11 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import sys
 import time
-import urllib.request
 import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -59,7 +58,7 @@ def lookup_labels() -> dict[str, str]:
     except Exception as e:
         print(f"  Warning: could not look up labels: {e}", file=sys.stderr)
         return {}
-    return {l["name"]: l["id"] for l in data.get("data", {}).get("issueLabels", {}).get("nodes", [])}
+    return {label["name"]: label["id"] for label in data.get("data", {}).get("issueLabels", {}).get("nodes", [])}
 
 
 def parse_build_plan(plan_text: str) -> dict:
@@ -238,7 +237,7 @@ def issue_for_deploy(client_name: str, plan_path: str) -> dict:
 def create_issue(title: str, description: str, labels: list, priority: int = 2, parent_id: str | None = None) -> str | None:
     """Create a Linear issue. Returns the issue identifier (e.g. GRO-123) or None on failure."""
     label_map = lookup_labels()
-    label_ids = [label_map[l] for l in labels if l in label_map]
+    label_ids = [label_map[lbl] for lbl in labels if lbl in label_map]
     if not label_ids:
         print(f"  Warning: no valid labels found for {labels}", file=sys.stderr)
         return None

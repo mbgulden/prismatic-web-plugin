@@ -5,7 +5,11 @@ pwp_distill_generic.py — Generic version of Step 3 that works on any project t
 Like pwp_distill.py but adapts issue templates based on the project type
 and uses the synthesis.md + profile.json as input.
 """
-import os, sys, json, re, subprocess, argparse
+import argparse
+import json
+import os
+import re
+import sys
 from pathlib import Path
 
 # Linear setup (same as pwp_distill.py)
@@ -86,7 +90,7 @@ def extract_tasks(synthesis_text: str) -> list:
     return list(dict.fromkeys(tasks))[:30]  # cap at 30 tasks
 
 def create_issue(title, description, labels, priority, parent_id=None):
-    label_ids = [LABELS[l] for l in labels if LABELS.get(l)]
+    label_ids = [LABELS[lbl] for lbl in labels if LABELS.get(lbl)]
     if not label_ids:
         label_ids = [LABELS["agent:fred"]]
     input_data = {
