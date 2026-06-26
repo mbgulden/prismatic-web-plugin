@@ -31,3 +31,8 @@ output/
 
 # Logs
 *.log
+
+# Coverage
+.coverage
+coverage.xml
+htmlcov/

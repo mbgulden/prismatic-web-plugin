@@ -28,3 +28,44 @@ pwb = "prismatic_web_plugin.builder:main"
 [project.urls]
 "Source" = "https://github.com/mbgulden/prismatic-web-plugin"
 "Issues" = "https://linear.app/growthwebdev/issue/GRO-2137"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "ruff>=0.1",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+addopts = "-ra --strict-markers"
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.coverage.run]
+source = ["src/prismatic_web_plugin"]
+branch = true
+omit = [
+    "src/prismatic_web_plugin/*_generic.py",
+    "src/prismatic_web_plugin/__init__.py",
+]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = false
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]

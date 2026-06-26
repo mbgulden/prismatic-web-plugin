@@ -29,13 +29,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .distill import run_distill
+
 # The 3 pipeline steps live in this package as library functions.
 # We import + call them directly (no subprocess). This is faster, testable,
 # and lets the orchestrator see structured return values instead of parsing CLI output.
-
 from .ingest import run_ingest
 from .synthesize import run_synthesize
-from .distill import run_distill
 
 PWP_HOME = Path(os.environ.get("PWP_HOME", "/home/ubuntu/work/prismatic-web-plugin"))
 OUTPUT_BASE = PWP_HOME / "output"
@@ -191,7 +191,7 @@ def watch_epic(epic_id: str, *, poll_interval: int = 60, max_runtime: int = 8640
 
         # Done?
         if all(c["state"] in ("Done", "Canceled") for c in status.get("children", [])):
-            log("watch", f"All children terminal. Watch ending.")
+            log("watch", "All children terminal. Watch ending.")
             return 0
 
         time.sleep(poll_interval)

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import subprocess
 import sys
@@ -295,12 +294,12 @@ def main():
     print(f"Slug: {result['paths'].get('profile', '').rsplit('/', 2)[-2] if result['paths'].get('profile') else 'N/A'}")
     print(f"Status: {result['status']}")
     if result.get("missing_fields"):
-        print(f"\nMissing required fields:")
+        print("\nMissing required fields:")
         for m in result["missing_fields"]:
             print(f"  - {m}")
 
     if result.get("paths", {}).get("profile"):
-        print(f"\nWrote:")
+        print("\nWrote:")
         for k, v in result["paths"].items():
             if v:
                 print(f"  {v}")
