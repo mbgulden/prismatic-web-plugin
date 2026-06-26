@@ -47,11 +47,23 @@ pwb status --epic <epic-uuid>
 | 7. Deploy | (Ned) | Cloudflare Pages site | Live |
 | 8. Document | (the builder) | OKF handoff package | Todo |
 
+## Standard website stack
+
+PWP-managed client sites should default to **Astro + EmDash**:
+
+- **Astro** owns frontend architecture, routes, components, performance, and Cloudflare deployment.
+- **EmDash** owns editable content, admin UI, media, site settings, menus, preview/revisions, and structured content that agents can safely modify.
+
+Emergency stabilization pages are explicitly disposable. If PWP generates a fast placeholder to keep a broken client domain alive, the generated site must mark it as `placeholderOnly`; when client-approved direction arrives, those emergency style/content decisions are set aside as if they never existed.
+
+See [`docs/astro-emdash-system.md`](docs/astro-emdash-system.md).
+
 ## Status
 
 - **Steps 1-3**: Done (proven on Meridian Women's Defense Academy + 4 other projects)
+- **Astro + EmDash kernel**: First scaffold slice added (`prismatic_web_plugin.astro_emdash`)
 - **Demo build (Meridian)**: In progress (6/15 pages done, agent swarm executing)
-- **Orchestrator (this repo)**: Todo (this build)
+- **Builder integration**: Next — wire scaffold into `pwb run` after synthesize/distill
 - **Plugin skeleton + GRO-1497 hooks**: Todo (Phase 3 of master synthesis)
 
 ## Repo structure
