@@ -12,9 +12,12 @@ This is the "forward compatibility" version — any project type, any docs.
 Usage:
     python3 pwp_ingest_generic.py <path-to-project-okf-docs-dir>
 """
-import os, sys, json, re, subprocess
-from pathlib import Path
+import json
+import re
+import subprocess
+import sys
 from datetime import datetime, timezone
+from pathlib import Path
 
 GENERIC_SCHEMA = {
     "project": {
@@ -347,7 +350,7 @@ def main():
 
     profile_path.write_text(json.dumps(output, indent=2), encoding="utf-8")
     print(f"\n✓ Wrote: {profile_path}")
-    print(f"\nProfile summary:")
+    print("\nProfile summary:")
     print(f"  Name: {output['project']['name']}")
     print(f"  Type: {output['project']['type']}")
     print(f"  Mission: {output['project']['mission'][:120]}")

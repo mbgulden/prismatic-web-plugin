@@ -9,9 +9,9 @@ from pathlib import Path
 # Allow tests to be run from the repo root
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
+from prismatic_web_plugin.distill import parse_build_plan  # noqa: E402
 from prismatic_web_plugin.ingest import find_5_docs, slugify  # noqa: E402
 from prismatic_web_plugin.synthesize import synthesize_stub  # noqa: E402
-from prismatic_web_plugin.distill import parse_build_plan  # noqa: E402
 
 
 def test_slugify():

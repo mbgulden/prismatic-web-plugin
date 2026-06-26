@@ -5,9 +5,11 @@ pwp_synthesize_generic.py — Generic version of Step 2 that works on any projec
 Like pwp_synthesize.py but adapts the synthesis prompt based on the project type
 (game, saas, web, homelab, etc.) and uses the generic profile JSON as input.
 """
-import os, sys, json, re, subprocess
+import json
+import re
+import subprocess
+import sys
 from pathlib import Path
-from datetime import datetime, timezone
 
 PROMPTS = {
     "game": """You are a senior game producer and tech lead producing a comprehensive build/iteration plan for a game project.
@@ -167,7 +169,7 @@ def main():
     # Generic version doesn't have the placeholders — just use the profile directly
     prompt += "\n\n# Project Profile\n\n```json\n" + json.dumps(profile, indent=2) + "\n```\n"
 
-    print(f"\nSynthesizing with AGY pro...")
+    print("\nSynthesizing with AGY pro...")
     result = subprocess.run(
         [
             "/home/ubuntu/.local/bin/agy",
