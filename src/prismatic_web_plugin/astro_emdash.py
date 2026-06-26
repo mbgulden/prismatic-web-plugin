@@ -13,6 +13,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .approval import (
+    ApprovalState,
+    compute_content_model_version,
+    compute_style_guide_version,
+)
 
 EMDASH_VERSION = "0.23.0"
 ASTRO_VERSION = "^7.0.0"
@@ -119,6 +124,11 @@ def render_starter_files(model: SiteModel) -> dict[str, str]:
     """
     primary = model.brand_colors[0] if model.brand_colors else "#111827"
     accent = model.brand_colors[1] if len(model.brand_colors) > 1 else "#c6a86b"
+
+    style_guide_dict = {"primary": primary, "accent": accent, "mode": "dark"}
+    content_model_dict = {"schema": "page", "fields": ["headline", "body", "primaryCtaLabel", "primaryCtaHref"]}
+    style_guide_version = compute_style_guide_version(style_guide_dict)
+    content_model_version = compute_content_model_version(content_model_dict)
     package_name = f"pwp-site-{model.slug}"
     site_json = {
         "schemaVersion": 1,
@@ -148,6 +158,19 @@ def render_starter_files(model: SiteModel) -> dict[str, str]:
             "clientApprovedDirectionSupersedesPlaceholder": True,
             "editableStack": "Astro + EmDash",
         },
+        "pwpApproval": {
+            "version": 1,
+            "styleGuideVersion": style_guide_version,
+            "contentModelVersion": content_model_version,
+            "approvalState": ApprovalState.PENDING.value,
+            "requiresApprovalForProduction": True,
+            "stagingPreviewUrl": "",
+            "rollbackCommand": (
+                "PYTHONPATH=src python3 -m prismatic_web_plugin.approval "
+                f"rollback ./workspace --style-guide-version {style_guide_version} "
+                f"--content-model-version {content_model_version}"
+            ),
+        },
     }
 
     return {
@@ -172,22 +195,22 @@ def render_starter_files(model: SiteModel) -> dict[str, str]:
                 "devDependencies": {"wrangler": "latest"},
             }
         ),
-        "astro.config.mjs": f"""import {{ defineConfig }} from 'astro/config';
+        "astro.config.mjs": """import { defineConfig } from 'astro/config';
 import cloudflare from '@astrojs/cloudflare';
 import emdash from 'emdash/astro';
-import {{ d1, kvCache, r2 }} from '@emdash-cms/cloudflare';
+import { d1, kvCache, r2 } from '@emdash-cms/cloudflare';
 
-export default defineConfig({{
+export default defineConfig({
   output: 'server',
   adapter: cloudflare(),
   integrations: [
-    emdash({{
-      database: d1({{ binding: 'DB' }}),
-      storage: r2({{ binding: 'MEDIA' }}),
-      objectCache: kvCache({{ binding: 'CACHE' }}),
-    }}),
+    emdash({
+      database: d1({ binding: 'DB' }),
+      storage: r2({ binding: 'MEDIA' }),
+      objectCache: kvCache({ binding: 'CACHE' }),
+    }),
   ],
-}});
+});
 """,
         "wrangler.jsonc": _json_dumps(
             {
@@ -217,6 +240,30 @@ export default defineConfig({{
             }
         ),
         "src/data/site.json": _json_dumps(site_json),
+        "pwp-approval.json": _json_dumps(
+            {
+                "version": 1,
+                "client_slug": model.slug,
+                "business_name": model.business_name,
+                "style_guide_version": style_guide_version,
+                "content_model_version": content_model_version,
+                "approval_state": ApprovalState.PENDING.value,
+                "requires_approval_for_production": True,
+                "staging_preview_url": "",
+                "deploy_history": "history/deploy_history.json",
+                "evidence_dir": "evidence/",
+                "rollback_command": (
+                    "PYTHONPATH=src python3 -m prismatic_web_plugin.approval rollback "
+                    "./workspace "
+                    f"--style-guide-version {style_guide_version} "
+                    f"--content-model-version {content_model_version}"
+                ),
+                "linear_issue": "",
+                "okf_paths": [
+                    "okf/projects/prismatic-web-plugin/decisions/2026-06-26-astro-emdash-pwp-standard.md"
+                ],
+            }
+        ),
         "src/layouts/BaseLayout.astro": """---
 const { title, description } = Astro.props;
 ---

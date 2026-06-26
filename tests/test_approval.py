@@ -12,13 +12,12 @@ These tests cover the library API. The CLI lives in `prismatic_web_plugin.approv
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 import pytest
 
 from prismatic_web_plugin.approval import (
-    ApprovalDecision,
     ApprovalPolicy,
     ApprovalRequest,
     ApprovalState,
@@ -36,7 +35,6 @@ from prismatic_web_plugin.approval import (
     rollback_to,
     write_evidence,
 )
-
 
 # ---------- fixtures -------------------------------------------------------
 

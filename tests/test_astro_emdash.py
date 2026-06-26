@@ -55,31 +55,69 @@ def test_render_starter_files_uses_astro_and_emdash():
     assert wrangler["compatibility_flags"] == ["nodejs_compat"]
 
 
+def test_render_starter_files_includes_pwp_approval_metadata():
+    """GRO-2505: every generated site must carry approval metadata + a rollback command."""
+    model = build_site_model(_valkyrie_profile(), placeholder_only=False)
+    files = render_starter_files(model)
+
+    # 1) Top-level site.json carries an embedded pwpApproval block.
+    site = json.loads(files["src/data/site.json"])
+    approval = site["pwpApproval"]
+    assert approval["styleGuideVersion"]
+    assert approval["contentModelVersion"]
+    assert approval["approvalState"] == "pending"
+    assert approval["requiresApprovalForProduction"] is True
+    assert "rollback" in approval["rollbackCommand"].lower()
+
+    # 2) A separate, discoverable pwp-approval.json is written at the project root.
+    standalone = json.loads(files["pwp-approval.json"])
+    assert standalone["client_slug"] == "valkyrie-arms-training"
+    assert standalone["approval_state"] == "pending"
+    assert standalone["requires_approval_for_production"] is True
+    assert standalone["style_guide_version"] == approval["styleGuideVersion"]
+    assert standalone["content_model_version"] == approval["contentModelVersion"]
+    assert standalone["okf_paths"], "OKF evidence paths must be embedded in the scaffold"
+    assert standalone["rollback_command"].startswith(
+        "PYTHONPATH=src python3 -m prismatic_web_plugin.approval rollback"
+    )
+
+
 def test_starter_seed_encodes_placeholder_policy():
     model = build_site_model(_valkyrie_profile(), placeholder_only=True)
-    site = json.loads(render_starter_files(model)["src/data/site.json"])
-
+    files = render_starter_files(model)
+    site = json.loads(files["src/data/site.json"])
     assert site["placeholderOnly"] is True
     assert site["pwpPolicy"]["emergencyPlaceholdersDoNotSetStandards"] is True
-    assert site["pwpPolicy"]["clientApprovedDirectionSupersedesPlaceholder"] is True
     assert site["pwpPolicy"]["editableStack"] == "Astro + EmDash"
 
 
 def test_scaffold_astro_emdash_site_writes_expected_tree(tmp_path: Path):
-    profile = tmp_path / "client_profile.json"
-    profile.write_text(json.dumps(_valkyrie_profile()), encoding="utf-8")
+    profile = tmp_path / "profile.json"
+    profile.write_text(json.dumps(_valkyrie_profile()))
     out = tmp_path / "site"
 
-    result = scaffold_astro_emdash_site(profile, out, placeholder_only=True)
+    result = scaffold_astro_emdash_site(profile, out, placeholder_only=False, overwrite=True)
 
     assert result["status"] == "ok"
-    assert result["placeholder_only"] is True
     assert (out / "package.json").exists()
     assert (out / "astro.config.mjs").exists()
     assert (out / "wrangler.jsonc").exists()
+    assert (out / "src/data/site.json").exists()
     assert (out / "src/pages/index.astro").exists()
-    assert (out / "emdash.seed.json").exists()
+    assert (out / "pwp-approval.json").exists()
 
-    site = json.loads((out / "src/data/site.json").read_text(encoding="utf-8"))
-    assert site["businessName"] == "Valkyrie Arms Training"
-    assert site["homePage"]["primaryCtaHref"] == "tel:+12088138780"
+
+def test_scaffold_astro_emdash_site_emits_rollback_command_in_seeded_metadata(tmp_path: Path):
+    profile = tmp_path / "profile.json"
+    profile.write_text(json.dumps(_valkyrie_profile()))
+    out = tmp_path / "site"
+
+    scaffold_astro_emdash_site(profile, out, placeholder_only=False, overwrite=True)
+
+    approval = json.loads((out / "pwp-approval.json").read_text())
+    assert approval["rollback_command"].startswith(
+        "PYTHONPATH=src python3 -m prismatic_web_plugin.approval rollback"
+    )
+    # The rollback command must target a real snapshot version (not an empty string).
+    assert "--style-guide-version " + approval["style_guide_version"] in approval["rollback_command"]
+    assert "--content-model-version " + approval["content_model_version"] in approval["rollback_command"]

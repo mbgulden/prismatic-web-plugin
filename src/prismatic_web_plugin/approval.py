@@ -35,7 +35,6 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Iterable
 
-
 # ---------------------------------------------------------------------------
 # Small helpers (defined BEFORE dataclasses that use them as default factories)
 # ---------------------------------------------------------------------------
@@ -892,6 +891,13 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin CLI s
     p_history = sub.add_parser("history", help="Print deploy history for the workspace.")
     p_history.add_argument("workspace")
 
+    p_rollback = sub.add_parser("rollback", help="Rollback the workspace to a prior snapshot.")
+    p_rollback.add_argument("workspace")
+    p_rollback.add_argument("--style-guide-version", required=True)
+    p_rollback.add_argument("--content-model-version", required=True)
+    p_rollback.add_argument("--actor", default="pwp-rollback")
+    p_rollback.add_argument("--request-id", default=None)
+
     args = parser.parse_args(argv)
     workspace = Path(args.workspace)
 
@@ -930,6 +936,16 @@ def main(argv: list[str] | None = None) -> int:  # pragma: no cover - thin CLI s
         return 0
     if args.cmd == "history":
         _print_json(list_deploy_history(workspace))
+        return 0
+    if args.cmd == "rollback":
+        result = rollback_to(
+            workspace,
+            args.style_guide_version,
+            args.content_model_version,
+            actor=args.actor,
+            request_id=args.request_id,
+        )
+        _print_json(result)
         return 0
 
     parser.error(f"Unknown command: {args.cmd}")
