@@ -254,7 +254,7 @@ def test_rollback_restores_previous_style_guide_and_content_model(workspace, cha
     v1_style = json.loads((workspace / "style_guide.json").read_text())
     v1_model = json.loads((workspace / "content_model.json").read_text())
     snapshot_v1 = VersionSnapshot.capture(workspace, style_guide=v1_style, content_model=v1_model)
-    snapshot_v1.persist(workspace)
+    snapshot_v1.persist(workspace, style_guide=v1_style, content_model=v1_model)
 
     # Mutate to v2 and deploy.
     v2_style = {**v1_style, "accent": "#ff5500"}
@@ -301,7 +301,9 @@ def test_rollback_records_a_history_entry(workspace, change_profile):
         style_guide=json.loads((workspace / "style_guide.json").read_text()),
         content_model=json.loads((workspace / "content_model.json").read_text()),
     )
-    snapshot_v1.persist(workspace)
+    v1_style = json.loads((workspace / "style_guide.json").read_text())
+    v1_model = json.loads((workspace / "content_model.json").read_text())
+    snapshot_v1.persist(workspace, style_guide=v1_style, content_model=v1_model)
 
     request = propose_change(workspace, change_profile, requested_by="michael@gulden.io")
     approved = approve_request(workspace, request.id, approver="client@valkyrie.com", notes="ok")
